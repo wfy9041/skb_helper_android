@@ -1,0 +1,39 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.wx.skb.hostapp"
+    compileSdk 33
+    ndkVersion "21.1.6352462"
+
+    defaultConfig {
+        applicationId "com.wx.skb.hostapp"
+        minSdk 23
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++11"
+            }
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs = [
+                    "src/main/java",
+                    "../../src/main/java"
+            ]
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.10.2"
+        }
+    }
+}

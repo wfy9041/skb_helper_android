@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SKB 测试上位机 UI 布局预览</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --text: #142033;
+      --muted: #596579;
+      --line: #d8dee8;
+      --primary: #1769aa;
+      --danger: #b3261e;
+      --surface: #edf2f7;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background: var(--bg);
+      display: flex;
+      justify-content: center;
+      padding: 24px 12px;
+    }
+
+    main {
+      width: min(100%, 420px);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    select,
+    input,
+    button {
+      height: 40px;
+      border-radius: 6px;
+      font-size: 16px;
+      font-family: inherit;
+    }
+
+    select,
+    input {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      padding: 0 10px;
+    }
+
+    input[type="number"] {
+      width: 64px;
+      text-align: center;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--text);
+      padding: 0 12px;
+      cursor: default;
+      white-space: nowrap;
+    }
+
+    .primary {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .danger {
+      border-color: var(--danger);
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .serial-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .serial-row select {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .group {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+
+    .group-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .group-header label {
+      min-width: 52px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .actions button {
+      width: 100%;
+    }
+
+    .address-fields {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .inline-action {
+      margin-left: auto;
+    }
+
+    .lock-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .address-fields span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .status {
+      margin-top: 14px;
+      padding: 10px 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .log {
+      min-height: 110px;
+      margin: 0;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      color: #1e2632;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 360px) {
+      main {
+        padding: 12px;
+      }
+
+      .serial-row {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .serial-row button {
+        grid-column: 2;
+        justify-self: start;
+      }
+
+      .actions {
+        grid-template-columns: 1fr;
+      }
+
+      .inline-action {
+        margin-left: 0;
+      }
+
+      .lock-actions {
+        margin-left: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>SKB测试上位机</h1>
+
+    <section class="serial-row" aria-label="串口连接">
+      <label for="serial">串口设备</label>
+      <select id="serial">
+        <option>/dev/ttyS1</option>
+        <option>/dev/ttyS2</option>
+        <option>/dev/ttyAMA0</option>
+      </select>
+      <button class="primary">开启</button>
+    </section>
+
+    <section class="group" aria-label="单锁操作">
+      <div class="group-header">
+        <label for="lock-id">锁号</label>
+        <input id="lock-id" type="number" min="1" max="999" value="1" inputmode="numeric">
+        <div class="lock-actions">
+          <button class="primary">瞬时开锁</button>
+          <button>常开</button>
+          <button class="danger">常关</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button>查门状态</button>
+        <button>查全部</button>
+      </div>
+    </section>
+
+    <section class="group" aria-label="延时关">
+      <div class="group-header">
+        <label for="delay">延时 ticks</label>
+        <input id="delay" type="number" min="1" max="999" value="20" inputmode="numeric">
+        <span class="status">1 tick = 50ms</span>
+        <button class="danger inline-action">延时关</button>
+      </div>
+    </section>
+
+    <section class="group" aria-label="配置地址范围">
+      <div class="group-header address-fields">
+        <label>地址范围</label>
+        <span>起始</span>
+        <input type="number" min="1" max="999" value="1" inputmode="numeric">
+        <span>结束</span>
+        <input type="number" min="1" max="999" value="12" inputmode="numeric">
+        <button class="inline-action">配置地址</button>
+        <button>兼容配置</button>
+      </div>
+    </section>
+
+    <section class="status" aria-label="状态">未连接</section>
+    <pre class="log" aria-label="日志">日志输出...</pre>
+  </main>
+</body>
+</html>
