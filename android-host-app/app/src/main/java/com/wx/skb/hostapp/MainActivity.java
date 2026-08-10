@@ -3,6 +3,8 @@ package com.wx.skb.hostapp;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -13,6 +15,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
@@ -20,6 +23,7 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import com.wx.skb.SerialTransport;
+import com.wx.skb.SerialTimeoutException;
 import com.wx.skb.SkbClient;
 import java.io.IOException;
 import java.io.File;
@@ -35,6 +39,11 @@ import java.util.concurrent.Executors;
 import android.view.ViewGroup;
 
 public final class MainActivity extends Activity {
+    public static final String EXTRA_SOURCE = "source";
+    public static final String EXTRA_CALLER_PACKAGE = "caller_package";
+    public static final String EXTRA_SERIAL_PORT = "serial_port";
+    public static final String EXTRA_RETURN_STATUS = "return_status";
+    private static final String RETURN_STATUS_CLOSED = "serial_closed";
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final int DEFAULT_BAUD_RATE = 9600;
@@ -43,6 +52,8 @@ public final class MainActivity extends Activity {
     private static final int LEGACY_COMMAND_INTERVAL_MILLIS = 500;
     private static final int CONTROL_HEIGHT_DP = 56;
     private static final int MAX_LOG_FRAME_LENGTH = 261;
+    private static final int RX_MONITOR_BUFFER_SIZE = 4096;
+    private static final int RX_MONITOR_TIMEOUT_MILLIS = 200;
     private static final String PREFS_NAME = "skb_host_app";
     private static final String PREF_DEVICE_PATH = "device_path";
     private Spinner deviceSpinner;
@@ -51,16 +62,57 @@ public final class MainActivity extends Activity {
     private EditText startLockIdInput;
     private EditText endLockIdInput;
     private EditText delayTicksInput;
+    private EditText customCommandInput;
     private TextView statusView;
     private TextView logView;
     private ScrollView logScrollView;
+    private NativeSerialTransport rawTransport;
     private SkbClient client;
+    private Thread rxMonitorThread;
+    private volatile boolean rxMonitorRunning;
+    private volatile boolean rxMonitorPaused;
+    private String callerSource;
+    private String callerPackage;
+    private String requestedDevicePath;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        hideSystemBars();
+        readCallerIntent(getIntent());
         setContentView(buildContentView());
         setConnected(false);
+        scheduleIntentSerialConnection();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            hideSystemBars();
+        }
+    }
+
+    private void hideSystemBars() {
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        readCallerIntent(intent);
+        if (requestedDevicePath != null) {
+            closeClient();
+            setConnected(false);
+            scheduleIntentSerialConnection();
+        }
     }
 
     @Override
@@ -68,6 +120,78 @@ public final class MainActivity extends Activity {
         closeClient();
         worker.shutdownNow();
         super.onDestroy();
+    }
+
+    private void readCallerIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        callerSource = nonEmpty(intent.getStringExtra(EXTRA_SOURCE));
+        callerPackage = nonEmpty(intent.getStringExtra(EXTRA_CALLER_PACKAGE));
+        requestedDevicePath = nonEmpty(intent.getStringExtra(EXTRA_SERIAL_PORT));
+        if (callerPackage == null && getCallingActivity() != null) {
+            callerPackage = getCallingActivity().getPackageName();
+        }
+    }
+
+    private void scheduleIntentSerialConnection() {
+        if (requestedDevicePath == null) {
+            return;
+        }
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                connect(requestedDevicePath);
+            }
+        });
+    }
+
+    private String nonEmpty(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private String appVersionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (PackageManager.NameNotFoundException e) {
+            return "unknown";
+        }
+    }
+
+    private boolean hasIntentExtras() {
+        return callerSource != null || callerPackage != null || requestedDevicePath != null;
+    }
+
+    private Runnable returnToCallerAction() {
+        return new Runnable() {
+            @Override
+            public void run() {
+                closeClient();
+                setConnected(false);
+
+                Intent result = new Intent();
+                result.putExtra(EXTRA_RETURN_STATUS, RETURN_STATUS_CLOSED);
+                if (getCallingActivity() != null) {
+                    setResult(RESULT_OK, result);
+                    finish();
+                    return;
+                }
+
+                if (callerPackage != null) {
+                    Intent callerIntent = getPackageManager().getLaunchIntentForPackage(callerPackage);
+                    if (callerIntent != null) {
+                        callerIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                        callerIntent.putExtra(EXTRA_RETURN_STATUS, RETURN_STATUS_CLOSED);
+                        startActivity(callerIntent);
+                    }
+                }
+                finish();
+            }
+        };
     }
 
     private View buildContentView() {
@@ -82,14 +206,49 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         // ----- 标题 -----
+        FrameLayout titleRow = new FrameLayout(this);
         TextView title = new TextView(this);
-        title.setText("SKB测试上位机");
+        title.setText("SKB调试工具");
         title.setTextSize(22);
         title.setTextColor(Color.rgb(20, 30, 45));
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        root.addView(title, matchWrap());
+        title.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                dp(CONTROL_HEIGHT_DP));
+        titleParams.gravity = Gravity.CENTER;
+        titleRow.addView(title, titleParams);
+
+        TextView version = new TextView(this);
+        version.setText("v" + appVersionName());
+        version.setTextSize(14);
+        version.setTextColor(Color.rgb(89, 101, 121));
+        version.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+        version.setPadding(0, 0, dp(4), 0);
+        FrameLayout.LayoutParams versionParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                dp(CONTROL_HEIGHT_DP));
+        versionParams.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
+        titleRow.addView(version, versionParams);
+
+        if (hasIntentExtras()) {
+            FrameLayout.LayoutParams returnParams = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    dp(CONTROL_HEIGHT_DP));
+            returnParams.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
+            titleRow.addView(button("返回应用", ButtonStyle.NORMAL, returnToCallerAction()), returnParams);
+        }
+        root.addView(titleRow, matchWrap());
 
         // ----- 输入控件初始化 -----
+        if (callerSource != null) {
+            TextView sourceView = new TextView(this);
+            sourceView.setText("来源: " + callerSource);
+            sourceView.setTextSize(14);
+            sourceView.setTextColor(Color.rgb(89, 101, 121));
+            sourceView.setPadding(0, dp(4), 0, dp(4));
+            root.addView(sourceView, matchWrap());
+        }
+
         deviceSpinner = new Spinner(this);
         lockIdInput = input("1");
         lockIdInput.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -99,6 +258,10 @@ public final class MainActivity extends Activity {
         endLockIdInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         delayTicksInput = input("20");
         delayTicksInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        customCommandInput = input("");
+        customCommandInput.setGravity(Gravity.CENTER_VERTICAL);
+        customCommandInput.setHint("01 05 00 01");
+        customCommandInput.setInputType(InputType.TYPE_CLASS_TEXT);
 
         // ----- 串口行 -----
         LinearLayout serialRow = new LinearLayout(this);
@@ -130,9 +293,6 @@ public final class MainActivity extends Activity {
         lockHeader.addView(button("查全部", ButtonStyle.NORMAL, allDoorStatusAction()), actionButtonParams());
         root.addView(lockHeader, matchWrap());
 
-        // ----- 分割线 -----
-        root.addView(sectionLine(), sectionLineParams());
-
         // ----- 延时控制行 -----
         LinearLayout delayHeader = new LinearLayout(this);
         delayHeader.setOrientation(LinearLayout.HORIZONTAL);
@@ -143,10 +303,10 @@ public final class MainActivity extends Activity {
         tickHint.setText("1 tick = 50ms");
         tickHint.setTextSize(15);
         tickHint.setTextColor(Color.rgb(89, 101, 121));
-        delayHeader.addView(tickHint, weightTextParams());
-        delayHeader.addView(button("常开", ButtonStyle.NORMAL, keepOpenAction()), inlineButtonParams(false));
-        delayHeader.addView(button("常关", ButtonStyle.DANGER, keepCloseAction()), inlineButtonParams(true));
-        delayHeader.addView(button("延时关", ButtonStyle.DANGER, delayCloseAction()), inlineButtonParams(true));
+        delayHeader.addView(tickHint, delayHintParams());
+        delayHeader.addView(button("常开", ButtonStyle.NORMAL, keepOpenAction()), delayActionButtonParams());
+        delayHeader.addView(button("常关", ButtonStyle.DANGER, keepCloseAction()), delayActionButtonParams());
+        delayHeader.addView(button("延时关", ButtonStyle.DANGER, delayCloseAction()), delayActionButtonParams());
         root.addView(delayHeader, matchWrap());
 
         // ----- 分割线 -----
@@ -161,10 +321,22 @@ public final class MainActivity extends Activity {
         addressRangeRow.addView(startLockIdInput, numberParams());
         addressRangeRow.addView(smallText("结束"), wrapWrap());
         addressRangeRow.addView(endLockIdInput, numberParams());
-        addressRangeRow.addView(button("全开", ButtonStyle.PRIMARY, openAddressRangeAction()), inlineButtonParams(false));
-        addressRangeRow.addView(button("配置地址", ButtonStyle.NORMAL, setAddressRangeAction()), separatedInlineButtonParams());
-        addressRangeRow.addView(button("兼容配置", ButtonStyle.NORMAL, legacySetAddressRangeAction()), inlineButtonParams(true));
+        addressRangeRow.addView(button("全开", ButtonStyle.PRIMARY, openAddressRangeAction()), addressButtonParams(false));
+        addressRangeRow.addView(button("配置地址", ButtonStyle.NORMAL, setAddressRangeAction()), addressButtonParams(true));
+        addressRangeRow.addView(button("兼容配置", ButtonStyle.NORMAL, legacySetAddressRangeAction()), addressButtonParams(true));
         root.addView(addressRangeRow, matchWrap());
+
+        // ----- 分割线 -----
+        root.addView(sectionLine(), sectionLineParams());
+
+        // ----- 自定义串口命令 -----
+        LinearLayout customCommandRow = new LinearLayout(this);
+        customCommandRow.setOrientation(LinearLayout.HORIZONTAL);
+        customCommandRow.setGravity(Gravity.CENTER_VERTICAL);
+        customCommandRow.addView(rowLabel("自定义 HEX"), wrapWrap());
+        customCommandRow.addView(customCommandInput, customCommandParams());
+        customCommandRow.addView(button("发送", ButtonStyle.PRIMARY, sendCustomCommandAction()), rowButtonParams());
+        root.addView(customCommandRow, matchWrap());
 
         // ----- 分割线 -----
         root.addView(sectionLine(), sectionLineParams());
@@ -227,9 +399,14 @@ public final class MainActivity extends Activity {
                 ports);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         deviceSpinner.setAdapter(adapter);
-        String savedDevicePath = savedDevicePath();
-        if (savedDevicePath != null) {
-            int savedIndex = ports.indexOf(savedDevicePath);
+        String preferredDevicePath = requestedDevicePath != null
+                ? requestedDevicePath
+                : savedDevicePath();
+        if (preferredDevicePath != null && !ports.contains(preferredDevicePath)) {
+            ports.add(0, preferredDevicePath);
+        }
+        if (preferredDevicePath != null) {
+            int savedIndex = ports.indexOf(preferredDevicePath);
             if (savedIndex >= 0) {
                 deviceSpinner.setSelection(savedIndex);
             }
@@ -356,6 +533,7 @@ public final class MainActivity extends Activity {
                         int count = 0;
                         for (int lockId = start; lockId <= end; lockId++) {
                             lastAck = skb.openLock(lockId, DEFAULT_RESPONSE_TIMEOUT_MILLIS);
+                            appendLogFromAnyThread("锁号 " + lockId + " 响应解析: " + formatAck(lastAck));
                             count++;
                         }
                         return "opened " + count + " locks, last ack: " + formatAck(lastAck);
@@ -406,8 +584,14 @@ public final class MainActivity extends Activity {
     }
 
     private void connect() {
+        connect(null);
+    }
+
+    private void connect(String requestedPath) {
         closeClient();
-        final String devicePath = selectedDevicePath();
+        final String devicePath = requestedPath != null
+                ? requestedPath
+                : selectedDevicePath();
         if (devicePath == null) {
             appendLog("未发现可用串口，请检查设备节点权限");
             return;
@@ -418,9 +602,11 @@ public final class MainActivity extends Activity {
             public void run() {
                 try {
                     NativeSerialTransport transport = new NativeSerialTransport(devicePath, baudRate);
+                    rawTransport = transport;
                     final SkbClient skb = new SkbClient(new LoggingSerialTransport(transport));
                     skb.setCommandIntervalMillis(DEFAULT_COMMAND_INTERVAL_MILLIS);
                     client = skb;
+                    startRxMonitor(transport);
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
@@ -451,6 +637,7 @@ public final class MainActivity extends Activity {
         worker.execute(new Runnable() {
             @Override
             public void run() {
+                rxMonitorPaused = true;
                 try {
                     final String result = task.run(skb);
                     mainHandler.post(new Runnable() {
@@ -466,14 +653,98 @@ public final class MainActivity extends Activity {
                             appendLog(name + " 失败: " + e.getMessage());
                         }
                     });
+                } finally {
+                    rxMonitorPaused = false;
                 }
             }
         });
     }
 
+    private Runnable sendCustomCommandAction() {
+        return new Runnable() {
+            @Override
+            public void run() {
+                final NativeSerialTransport transport = rawTransport;
+                if (transport == null) {
+                    appendLog("请先连接串口");
+                    return;
+                }
+                final byte[] data;
+                try {
+                    data = parseHexCommand(customCommandInput.getText().toString());
+                } catch (IllegalArgumentException e) {
+                    appendLog("自定义发送失败: " + e.getMessage());
+                    return;
+                }
+                worker.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            transport.write(data);
+                        } catch (final Exception e) {
+                            mainHandler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    appendLog("自定义发送失败: " + e.getMessage());
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+        };
+    }
+
+    private void startRxMonitor(final NativeSerialTransport transport) {
+        rxMonitorRunning = false;
+        if (rxMonitorThread != null) {
+            rxMonitorThread.interrupt();
+        }
+        rxMonitorRunning = true;
+        rxMonitorPaused = false;
+        rxMonitorThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (rxMonitorRunning && rawTransport == transport) {
+                    if (rxMonitorPaused) {
+                        sleepQuietly(20);
+                        continue;
+                    }
+                    try {
+                        byte[] data = transport.readAvailable(
+                                RX_MONITOR_BUFFER_SIZE,
+                                RX_MONITOR_TIMEOUT_MILLIS);
+                        if (data.length > 0) {
+                            appendLogFromAnyThread("RX 主动上报: " + toHex(data));
+                        }
+                    } catch (SerialTimeoutException ignored) {
+                        // No bytes arrived in this polling window.
+                    } catch (IOException e) {
+                        if (rxMonitorRunning && rawTransport == transport) {
+                            appendLogFromAnyThread("RX监听停止: " + e.getMessage());
+                        }
+                        break;
+                    }
+                }
+            }
+        }, "skb-rx-monitor");
+        rxMonitorThread.start();
+    }
+
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private void closeClient() {
+        rxMonitorRunning = false;
+        rxMonitorPaused = false;
         SkbClient oldClient = client;
         client = null;
+        rawTransport = null;
         if (oldClient != null) {
             try {
                 oldClient.close();
@@ -569,6 +840,29 @@ public final class MainActivity extends Activity {
             builder.append(String.format(Locale.US, "%02X", data[i] & 0xff));
         }
         return builder.toString();
+    }
+
+    private byte[] parseHexCommand(String text) {
+        String normalized = text.trim()
+                .replace("0x", "")
+                .replace("0X", "")
+                .replaceAll("[\\s,;:-]+", "");
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("请输入 HEX 命令");
+        }
+        if ((normalized.length() & 1) != 0) {
+            throw new IllegalArgumentException("HEX 长度必须为偶数");
+        }
+        byte[] data = new byte[normalized.length() / 2];
+        for (int i = 0; i < data.length; i++) {
+            int high = Character.digit(normalized.charAt(i * 2), 16);
+            int low = Character.digit(normalized.charAt(i * 2 + 1), 16);
+            if (high < 0 || low < 0) {
+                throw new IllegalArgumentException("HEX 包含非法字符");
+            }
+            data[i] = (byte) ((high << 4) | low);
+        }
+        return data;
     }
 
     private void appendLog(String message) {
@@ -779,11 +1073,47 @@ public final class MainActivity extends Activity {
         return params;
     }
 
+    private LinearLayout.LayoutParams customCommandParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0,
+                dp(CONTROL_HEIGHT_DP),
+                1f);
+        params.setMargins(0, dp(4), dp(8), dp(4));
+        return params;
+    }
+
     private LinearLayout.LayoutParams inlineButtonParams(boolean leadingGap) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 dp(CONTROL_HEIGHT_DP));
         params.setMargins(leadingGap ? dp(8) : 0, dp(8), 0, dp(4));
+        return params;
+    }
+
+    private LinearLayout.LayoutParams delayHintParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                2.5f);
+        params.setMargins(0, dp(4), 0, dp(4));
+        return params;
+    }
+
+    private LinearLayout.LayoutParams delayActionButtonParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0,
+                dp(CONTROL_HEIGHT_DP),
+                2f);
+        params.setMargins(dp(4), dp(4), 0, dp(4));
+        return params;
+    }
+
+    private LinearLayout.LayoutParams addressButtonParams(boolean leadingGap) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0,
+                dp(CONTROL_HEIGHT_DP),
+                1f);
+        params.setMargins(leadingGap ? dp(4) : 0, dp(8), 0, dp(4));
         return params;
     }
 
@@ -923,6 +1253,11 @@ public final class MainActivity extends Activity {
         public void write(byte[] data) throws IOException {
             appendLogFromAnyThread("TX 原始: " + toHex(data));
             delegate.write(data);
+        }
+
+        @Override
+        public void clearInputBuffer() throws IOException {
+            delegate.clearInputBuffer();
         }
 
         @Override

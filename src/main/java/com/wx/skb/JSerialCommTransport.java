@@ -8,6 +8,7 @@ final class JSerialCommTransport implements SerialTransport {
     private final Object serialPort;
     private final Method writeBytes;
     private final Method readBytes;
+    private final Method flushIOBuffers;
     private final Method closePort;
     private final Class<?> writeCountType;
     private final Class<?> readCountType;
@@ -41,6 +42,7 @@ final class JSerialCommTransport implements SerialTransport {
 
             writeBytes = byteCountMethod(serialPortClass, "writeBytes");
             readBytes = byteCountMethod(serialPortClass, "readBytes");
+            flushIOBuffers = serialPortClass.getMethod("flushIOBuffers");
             writeCountType = writeBytes.getParameterTypes()[1];
             readCountType = readBytes.getParameterTypes()[1];
             closePort = serialPortClass.getMethod("closePort");
@@ -48,6 +50,20 @@ final class JSerialCommTransport implements SerialTransport {
             throw new SkbException("jSerialComm is required at runtime: com.fazecast:jSerialComm", e);
         } catch (ReflectiveOperationException e) {
             throw new SkbException("failed to initialize jSerialComm transport", e);
+        }
+    }
+
+    @Override
+    public void clearInputBuffer() throws IOException {
+        try {
+            boolean flushed = (Boolean) flushIOBuffers.invoke(serialPort);
+            if (!flushed) {
+                throw new IOException("serial input buffer flush failed");
+            }
+        } catch (IllegalAccessException e) {
+            throw new IOException("serial input buffer flush failed", e);
+        } catch (InvocationTargetException e) {
+            throw asIOException("serial input buffer flush failed", e);
         }
     }
 

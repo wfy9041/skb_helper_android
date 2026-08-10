@@ -246,6 +246,7 @@ public class SkbClient implements Closeable {
 
     private void writeFrame(int requestDeviceAddress, int function, int requestSequence, byte[] data) throws IOException {
         waitCommandInterval();
+        transport.clearInputBuffer();
         ProtocolFrame frame = new ProtocolFrame(requestDeviceAddress, function, requestSequence, data);
         transport.write(frame.encode());
     }

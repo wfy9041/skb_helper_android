@@ -9,14 +9,30 @@ android {
 
     defaultConfig {
         applicationId "com.wx.skb.hostapp"
-        minSdk 23
+        minSdk 21
         targetSdk 33
         versionCode 1
-        versionName "1.0"
+        versionName "1.1.0"
 
         externalNativeBuild {
             cmake {
                 cppFlags "-std=c++11"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            if (variant.buildType.name == "release") {
+                output.outputFileName = "SkbDebugTool-v${variant.versionName}-release.apk"
             }
         }
     }

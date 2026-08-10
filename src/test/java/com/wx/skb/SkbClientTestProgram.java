@@ -224,6 +224,15 @@ public final class SkbClientTestProgram {
         }
 
         @Override
+        public void clearInputBuffer() throws IOException {
+            ensureOpen();
+            if (responseOffset >= response.length) {
+                response = new byte[0];
+                responseOffset = 0;
+            }
+        }
+
+        @Override
         public byte[] read(int length, int timeoutMillis) throws IOException {
             ensureOpen();
             if (responseOffset + length > response.length) {
