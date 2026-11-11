@@ -1,5 +1,7 @@
 # SKB Java SDK
 
+控制板购买连接https://item.taobao.com/item.htm?_u=b2mf356fddc&id=683417336159&spm=a1z09.8149145.0.0.23ed37e4nlpgRB
+
 这是基于当前固件公共协议实现的 Java 操作库。SDK 初始化只需要传入串口设备名，默认串口参数为 `9600 8 N 1`。
 
 ## 协议格式
