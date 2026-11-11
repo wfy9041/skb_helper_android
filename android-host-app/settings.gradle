@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "SkbHostApp"
 include ":app"
+include ":skb-sdk"

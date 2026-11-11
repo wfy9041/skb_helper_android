@@ -3,7 +3,7 @@ package com.wx.skb.hostapp;
 import com.wx.skb.SerialTransport;
 import java.io.IOException;
 
-public final class NativeSerialTransport implements SerialTransport {
+public final class NativeSerialTransport implements ManagedSerialSession.Port {
     static {
         System.loadLibrary("skb_serial");
     }
@@ -21,9 +21,25 @@ public final class NativeSerialTransport implements SerialTransport {
     }
 
     @Override
+    public synchronized void clearInputBuffer() throws IOException {
+        ensureOpen();
+        nativeClearInput(handle);
+    }
+
+    @Override
     public synchronized byte[] read(int length, int timeoutMillis) throws IOException {
         ensureOpen();
         return nativeRead(handle, length, timeoutMillis);
+    }
+
+    public synchronized byte[] readAvailable(int maxLength, int timeoutMillis) throws IOException {
+        ensureOpen();
+        return nativeReadAvailable(handle, maxLength, timeoutMillis);
+    }
+
+    public synchronized byte[] readUntil(byte terminator, int maxLength, int timeoutMillis) throws IOException {
+        ensureOpen();
+        return nativeReadUntil(handle, terminator, maxLength, timeoutMillis);
     }
 
     @Override
@@ -44,7 +60,14 @@ public final class NativeSerialTransport implements SerialTransport {
 
     private static native void nativeWrite(long handle, byte[] data) throws IOException;
 
+    private static native void nativeClearInput(long handle) throws IOException;
+
     private static native byte[] nativeRead(long handle, int length, int timeoutMillis) throws IOException;
+
+    private static native byte[] nativeReadAvailable(long handle, int maxLength, int timeoutMillis) throws IOException;
+
+    private static native byte[] nativeReadUntil(
+            long handle, byte terminator, int maxLength, int timeoutMillis) throws IOException;
 
     private static native void nativeClose(long handle) throws IOException;
 }

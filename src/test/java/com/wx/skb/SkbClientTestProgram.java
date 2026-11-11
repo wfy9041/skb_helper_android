@@ -102,7 +102,9 @@ public final class SkbClientTestProgram {
 
     private static void printStatus(String name, SkbClient.StatusResult status) {
         System.out.println(name
-                + ": start=" + status.getStartLockId()
+                + ": TX=" + toHex(status.getRequestFrame())
+                + ", RX=" + toHex(status.getResponseFrame())
+                + ", start=" + status.getStartLockId()
                 + ", end=" + status.getEndLockId()
                 + ", status=" + toHex(status.getStatus()));
     }
@@ -220,6 +222,15 @@ public final class SkbClientTestProgram {
                 responseOffset = 0;
             } catch (SkbException e) {
                 throw new IOException("mock received invalid request", e);
+            }
+        }
+
+        @Override
+        public void clearInputBuffer() throws IOException {
+            ensureOpen();
+            if (responseOffset >= response.length) {
+                response = new byte[0];
+                responseOffset = 0;
             }
         }
 
