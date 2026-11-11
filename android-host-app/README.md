@@ -2,14 +2,19 @@
 
 这是面向工业 Android 设备的测试上位机 App，直接使用设备原生串口节点，例如 `/dev/ttyS*`、`/dev/ttySAC*`、`/dev/ttyAMA*`、`/dev/ttymxc*`。
 
-App 会复用上级目录的 Java SDK：
+App 会通过 Gradle 模块依赖引入本地 `skb-sdk`，构建宿主 APK 时会自动编译 SDK：
 
 ```text
-../src/main/java/com/wx/skb
+:skb-sdk
 ```
+
+对外发布或给其他项目使用时，再单独生成 `skb-sdk-release.aar`。
 
 ## 功能
 
+- 启动页输入门号并调用公开的 `SkbSdk.openLock` 接口。
+- 启动页可打开或关闭固定的 `/dev/ttyS5` 串口连接。
+- 从启动页打开原生 SDK 调试面板查看底层串口调试信息。
 - 枚举 `/dev` 下常见串口设备，并通过下拉框选择。
 - 串口参数默认 `9600 8N1`。
 - 支持查门状态、查全部锁板、瞬时开锁、常开、常关、延时关。

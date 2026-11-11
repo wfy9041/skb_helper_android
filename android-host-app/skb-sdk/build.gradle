@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.wx.skb.sdk'
+    compileSdk 33
+    ndkVersion '21.1.6352462'
+    defaultConfig {
+        minSdk 21
+        consumerProguardFiles 'consumer-rules.pro'
+        externalNativeBuild {
+            cmake { cppFlags '-std=c++11' }
+        }
+    }
+    // The Android SDK owns its implementation sources. The root Java sources
+    // remain included as the protocol core for the standalone Maven SDK.
+    sourceSets.main {
+        java.srcDirs += ['../../src/main/java']
+    }
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.10.2'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+// Explicit entry point for Android Studio's Gradle task tree.
+// The generated artifact is still the standard release AAR.
+tasks.register('assembleAar') {
+    group = 'build'
+    description = 'Build the release AAR for the SKB SDK.'
+    dependsOn 'bundleReleaseAar'
+}

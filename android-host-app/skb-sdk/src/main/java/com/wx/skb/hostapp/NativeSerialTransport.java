@@ -3,7 +3,7 @@ package com.wx.skb.hostapp;
 import com.wx.skb.SerialTransport;
 import java.io.IOException;
 
-public final class NativeSerialTransport implements SerialTransport {
+public final class NativeSerialTransport implements ManagedSerialSession.Port {
     static {
         System.loadLibrary("skb_serial");
     }
